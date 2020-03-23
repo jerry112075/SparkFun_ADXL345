@@ -1,0 +1,159 @@
+// 2020/03/13
+//   Faya-Nugget 範例程式 (SparkFun_ADXL345_Example_modify)
+//   單元: 模組介紹 :faya 加速度計模組 (中斷功能及校正方法)
+//   網址: https://fayalab.blogspot.com/p/blog-page.html
+//   目標: (1) 使用ADXL345中斷功能，及校正數值
+
+//   接線: Arduino ==> faya模組
+//             A4 ==> SDA  (三軸加速度計)
+//             A5 ==> SCL  (三軸加速度計)
+//             D2 ==> INT1 (三軸加速度計)
+
+#include <SparkFun_ADXL345.h>            // 引入SparkFun ADXL345 函式庫
+
+#define ADXL345_MG2G_MULTIPLIER (0.004)   //2G
+#define ADXL345_MG16G_MULTIPLIER (0.032)  //16G
+
+#define offsetX   0      // 偏移量
+#define offsetY   0
+#define offsetZ   -17
+#define gainX     1      // 增益
+#define gainY     1
+#define gainZ     1
+
+float Nx, Ny, Nz; //校正後的X,Y,Z值
+
+int x, y, z;   //尚未校正X,Y,Z值
+
+
+ADXL345 adxl = ADXL345();                // 使用 I2C 通訊
+
+/****************** 中斷 ******************/
+int interruptPin = 2;                 // 設置引腳2為中斷引腳 (適用於大多數Arduino開發板)
+//關於中斷功能介紹可以參考以下網址
+//https://chtseng.wordpress.com/2015/12/25/arduino-%E4%B8%AD%E6%96%B7%E5%8A%9F%E8%83%BD/
+
+
+/******************** 設定 ********************/
+void setup() {
+
+  Serial.begin(9600);                 // 初始化串口通信
+  Serial.println("SparkFun ADXL345 Accelerometer Hook Up Guide Example");
+  Serial.println();
+
+  adxl.powerOn();                     // Power on the ADXL345
+
+  adxl.setRangeSetting(2);            //提供範圍設置
+                                      // 接受的值為 2g, 4g, 8g or 16g
+                                      // 高數值 =測量範圍更廣
+                                      // 低數值 =更高的靈敏度
+
+  adxl.setActivityXYZ(1, 0, 0);       // 設置活動狀態檢測的軸 "adxl.setActivityXYZ(X, Y, Z);" (1 == ON, 0 == OFF)
+  adxl.setActivityThreshold(75);      // 62.5mg per increment   // 設置活動閾值   (0-255)
+
+  adxl.setInactivityXYZ(1, 0, 0);     // 設置不活動狀態檢測的軸 "adxl.setInactivityXYZ(X, Y, Z);" (1 == ON, 0 == OFF)
+  adxl.setInactivityThreshold(75);    // 62.5mg per increment   // 設置不活動閾值 (0-255)
+  adxl.setTimeInactivity(5);          // 設定多少秒沒有活動是不活動狀態。
+
+  adxl.setTapDetectionOnXYZ(0, 0, 1); // 開啟單擊判斷XYZ軸 "adxl.setTapDetectionOnX(X, Y, Z);" (1 == ON, 0 == OFF)
+
+  // 設定單擊及雙擊參數 (0-255)
+  adxl.setTapThreshold(50);           // 62.5 mg per increment  敲擊檢測閾值
+  adxl.setTapDuration(20);            // 625 μs per increment   敲擊持續時間
+  adxl.setDoubleTapLatency(80);       // 1.25 ms per increment  敲擊延遲
+  adxl.setDoubleTapWindow(200);       // 1.25 ms per increment  第二次敲擊檢測到的等待時間
+
+  // 設定自由落體參數(0-255)
+  adxl.setFreeFallThreshold(7);       // (5 - 9) recommended - 62.5mg per increment  自由落體閾值,XYZ軸都餐參與
+  adxl.setFreeFallDuration(30);       // (20 - 70) recommended - 5ms per increment   預設30=150ms  ,設定自由落體時間
+
+  // 設定ADXL345的中斷引腳 1=INT1 ,2=INT2
+  adxl.setImportantInterruptMapping(2, 2 , 1, 2, 2);    // Sets "adxl.setEveryInterruptMapping(single tap, double tap, free fall, activity, inactivity);"
+
+
+
+  // 開啟每種模式的中斷 (1 == ON, 0 == OFF)
+  adxl.InactivityINT(0);
+  adxl.ActivityINT(0);
+  adxl.FreeFallINT(1);
+  adxl.doubleTapINT(0);
+  adxl.singleTapINT(1);
+
+  attachInterrupt(digitalPinToInterrupt(interruptPin), interrup, RISING );  // 附加中斷  RISING（當訊號上升時觸發）
+}
+
+void loop() {
+
+
+  adxl.readAccel(&x, &y, &z);         // 讀取加速度計值並將其存儲在x，y，z上方聲明的變量中
+
+  /* 查看X Y Z加速度計值 */
+  Serial.print(x);
+  Serial.print(", ");
+  Serial.print(y);
+  Serial.print(", ");
+  Serial.println(z);
+
+  //請參閱SparkFun ADXL345來學習如何校正 https://learn.sparkfun.com/tutorials/adxl345-hookup-guide。
+  //顯示 X、Y、Z各別的數值(單位為:g)
+  //當裝置平躺在桌上, 會量到向下的 1g 加速度
+  //測得加速度值Z = 238, 238 * 4mg = 952mg = 0.952g
+  //(0~255)=(0g~1g)   所以255-238=17 在偏移量填入-17，約可得到向下1g
+  Nx = (x - offsetX) / gainX * ADXL345_MG2G_MULTIPLIER ;
+  Ny = (y - offsetY) / gainY * ADXL345_MG2G_MULTIPLIER ;
+  Nz = (z - offsetZ) / gainZ * ADXL345_MG2G_MULTIPLIER ;
+  Serial.print("X: "); Serial.print(Nx); Serial.print("  ");
+  Serial.print("Y: "); Serial.print(Ny); Serial.print("  ");
+  Serial.print("Z: "); Serial.print(Nz); Serial.print("  ");
+  Serial.println("g");
+
+
+
+  byte interrupts = adxl.getInterruptSource();//返回值後清除所有觸發的動作，當不使用中斷時，記得要註解不必重複清除會無法使用
+  // ADXL_ISR();/ /將注解刪除不使用中斷，直接判斷單擊，雙擊，自由落體。
+
+
+}
+void interrup()
+{
+  Serial.println("*** 產生中斷 ***");
+}
+
+/********************* ISR *********************/
+/* Look for Interrupts and Triggered Action    */
+void ADXL_ISR() {
+
+  // getInterruptSource clears all triggered actions after returning value
+  // Do not call again until you need to recheck for triggered actions
+  byte interrupts = adxl.getInterruptSource();   //返回值後清除所有觸發的動作
+
+  // Free Fall Detection  自由落體檢測
+  if (adxl.triggered(interrupts, ADXL345_FREE_FALL)) {
+    Serial.println("*** FREE FALL ***");
+    //此處填寫在感測到自由落體時的動作
+  }
+
+  // Inactivity    不活動
+  if (adxl.triggered(interrupts, ADXL345_INACTIVITY)) {
+    Serial.println("*** INACTIVITY ***");
+    //此處填寫在感測到不活動時的動作
+  }
+
+  // Activity      活動
+  if (adxl.triggered(interrupts, ADXL345_ACTIVITY)) {
+    Serial.println("*** ACTIVITY ***");
+    //此處填寫在感測到活動時的動作
+  }
+
+  // Double Tap Detection  雙擊
+  if (adxl.triggered(interrupts, ADXL345_DOUBLE_TAP)) {
+    Serial.println("*** DOUBLE TAP ***");
+    //此處填寫在感測到雙擊時的動作
+  }
+
+  // Tap Detection  單擊
+  if (adxl.triggered(interrupts, ADXL345_SINGLE_TAP)) {
+    Serial.println("*** TAP ***");
+    //此處填寫在感測到單擊時的動作
+  }
+}
